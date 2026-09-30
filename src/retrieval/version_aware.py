@@ -47,7 +47,8 @@ class VersionAwareFilter:
             # Handle version check
             if version:
                 doc_ver = str(meta.get("version", ""))
-                if doc_ver and doc_ver != str(version):
+                target_ver = str(version).rstrip(".")
+                if doc_ver and doc_ver != target_ver and not doc_ver.startswith(target_ver + "."):
                     continue
 
             # Handle library check

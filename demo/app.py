@@ -1,143 +1,143 @@
 import time
+
 import streamlit as st
-import pandas as pd
 
 from src.data.samsung_demo import load_samsung_demo_data
-from src.retrieval.dense import DenseE5Retriever
 from src.retrieval.bm25 import BM25Retriever
-from src.retrieval.hybrid import hybrid_retrieve
+from src.retrieval.hybrid import reciprocal_rank_fusion
 from src.retrieval.version_aware import VersionAwareFilter, parse_version_intent
-from src.ranking.reranker import CodeReranker
 
-st.set_page_config(
-    page_title="Nexus Code Retrieval Engine | Samsung PRISM",
-    page_icon="🔍",
-    layout="wide",
-)
 
-st.title("⚡ Nexus Code Retrieval Engine")
-st.caption("Samsung PRISM - Hybrid Dense/Lexical Retrieval & Version-Aware Code Search")
+st.set_page_config(page_title="NEXUS — Agentic Code Intelligence", page_icon="⌕", layout="wide")
+st.title("NEXUS — Agentic Code Intelligence Retrieval")
+st.caption("Search code by intent, identifiers, and version context. NEXUS retrieves and ranks code examples; it does not generate code.")
 
-# Sidebar Configuration
-st.sidebar.header("⚙️ Retrieval Parameters")
-
-dataset_choice = st.sidebar.selectbox(
-    "Corpus Dataset",
-    options=["Samsung PRISM Demo (Version-Aware)", "CoIR AppsRetrieval Test Split"],
-)
-
-method = st.sidebar.selectbox(
-    "Retrieval Pipeline Method",
-    options=["hybrid-rerank", "hybrid", "dense", "bm25"],
-    index=0,
-)
-
-enable_reranker = st.sidebar.checkbox("Enable Cross-Encoder Reranking", value=(method == "hybrid-rerank"))
-version_filter_input = st.sidebar.text_input("Filter by SDK/Library Version (e.g. 3.0)", value="")
-top_k = st.sidebar.slider("Top-K Results", min_value=1, max_value=20, value=5)
+with st.sidebar:
+    st.header("Search configuration")
+    dataset_label = st.selectbox("Dataset", ["Samsung/demo examples", "CoIR AppsRetrieval · test split"])
+    method = st.selectbox("Retrieval method", ["BM25", "Dense E5", "Hybrid RRF"])
+    use_reranker = st.checkbox("Rerank candidates with cross-encoder", value=False)
+    explicit_version = st.text_input("Version filter (optional)", placeholder="3.0")
+    top_k = st.slider("Results", min_value=1, max_value=10, value=5)
+    st.caption("The Samsung/demo corpus is synthetic, small, and separate from the official CoIR benchmark.")
 
 
 @st.cache_resource
-def get_demo_data(dataset_key: str):
-    if dataset_key.startswith("Samsung"):
-        return load_samsung_demo_data()
-    else:
-        from src.data.coir import load_coir
-        queries, corpus, _ = load_coir(split="test")
+def load_dataset(dataset_name: str):
+    if dataset_name == "samsung_demo":
+        queries, corpus = load_samsung_demo_data()
         return queries, corpus
+    from src.data.coir import load_coir
+    queries, corpus, _ = load_coir(split="test")
+    return queries, corpus
 
 
-queries_dict, corpus = get_demo_data(dataset_choice)
-
-# Pre-indexed retrievers
 @st.cache_resource
-def get_retrievers(_corpus):
-    dense = DenseE5Retriever()
-    dense.build_index(_corpus)
-
-    bm25 = BM25Retriever()
-    bm25.fit(_corpus)
-
-    reranker = CodeReranker()
-    v_filter = VersionAwareFilter()
-    return dense, bm25, reranker, v_filter
+def build_bm25(_corpus, dataset_name: str):
+    return BM25Retriever().fit(_corpus)
 
 
-with st.spinner("Loading models and building vector/BM25 indices..."):
-    dense_retriever, bm25_retriever, reranker_model, v_filter_model = get_retrievers(corpus)
+@st.cache_resource
+def build_dense(_corpus, dataset_name: str):
+    from src.config.settings import get_settings
+    from src.retrieval.dense import DenseE5Retriever
+    settings = get_settings()
+    retriever = DenseE5Retriever(model_name=settings.dense_model_name, batch_size=settings.dense_batch_size)
+    retriever.build_index(_corpus)
+    return retriever
 
-st.markdown("### 🔎 Query Interface")
 
-preset_queries = [
-    "authentication using SDK version 3",
-    "replacement for deprecated authentication API",
-    "parse JSON response",
-    "sensor streaming in Knox SDK version 2",
+@st.cache_resource
+def build_reranker():
+    from src.ranking.reranker import CodeReranker
+    return CodeReranker()
+
+
+dataset_name = "samsung_demo" if dataset_label.startswith("Samsung") else "coir"
+try:
+    queries, corpus = load_dataset(dataset_name)
+    bm25 = build_bm25(corpus, dataset_name)
+except Exception as exc:
+    st.error(f"Could not load the selected dataset: {exc}")
+    st.stop()
+
+st.markdown(f"**Corpus:** {len(corpus):,} code records · **Dataset:** {dataset_label}")
+st.divider()
+
+examples = [
+    "Find current SDK v3 authentication API",
+    "Find deprecated authentication API and its replacement",
+    "Find code similar to parsing a JSON response",
+    "Migrate legacy v1 authentication to the current version",
 ]
-
-selected_preset = st.selectbox("Sample Preset Queries:", ["-- Select or type custom query below --"] + preset_queries)
-
-if selected_preset and not selected_preset.startswith("--"):
-    user_query = selected_preset
+query_source = st.radio("Query input", ["Write a query", "Use an example"], horizontal=True)
+if query_source == "Use an example":
+    query = st.selectbox("Example query", examples)
 else:
-    user_query = st.text_input("Natural Language Search Query:", value="authentication using SDK version 3")
+    query = st.text_input("Natural-language coding query", placeholder="e.g. Find deprecated authentication API and its replacement")
 
-if st.button("🚀 Execute Retrieval", type="primary"):
-    start_t = time.time()
-    query_obj = {"q1": {"text": user_query}}
+if st.button("Search code", type="primary", disabled=not query.strip()):
+    started = time.perf_counter()
+    try:
+        if method == "BM25":
+            scored = bm25.retrieve(query, top_k=100)
+        else:
+            dense = build_dense(corpus, dataset_name)
+            dense_ranked = dense.retrieve({"q": {"text": query}}, top_k=100).get("q", [])
+            if method == "Dense E5":
+                scored = [(doc_id, None) for doc_id in dense_ranked]
+            else:
+                lexical = bm25.retrieve_batch({"q": {"text": query}}, top_k=100).get("q", [])
+                scored = reciprocal_rank_fusion([dense_ranked, lexical], top_k=100)
 
-    # Step 1: Candidate retrieval
-    if method == "dense":
-        res = dense_retriever.retrieve(query_obj, top_k=50)
-        cands = res.get("q1", [])
-    elif method == "bm25":
-        res = bm25_retriever.retrieve_batch(query_obj, top_k=50)
-        cands = res.get("q1", [])
-    else:
-        d_res = dense_retriever.retrieve(query_obj, top_k=50)
-        b_res = bm25_retriever.retrieve_batch(query_obj, top_k=50)
-        f_res = hybrid_retrieve(d_res, b_res, top_k=50)
-        cands = f_res.get("q1", [])
+        candidates = [doc_id for doc_id, _ in scored]
+        intent = parse_version_intent(query)
+        filter_version = explicit_version.strip() or intent.get("version")
+        version_filter = VersionAwareFilter()
+        if filter_version:
+            candidates = version_filter.filter_candidates(candidates, corpus, version=filter_version)
+        elif intent:
+            candidates = [doc_id for doc_id, _ in version_filter.rerank_by_metadata_match(candidates, corpus, query)]
 
-    # Step 2: Version intent & filtering
-    if version_filter_input.strip():
-        cands = v_filter_model.filter_candidates(cands, corpus, version=version_filter_input.strip())
-    elif parse_version_intent(user_query):
-        boosted = v_filter_model.rerank_by_metadata_match(cands, corpus, user_query)
-        cands = [cid for cid, _ in boosted]
+        base_scores = dict(scored)
+        reranked = False
+        if use_reranker and candidates:
+            reranker = build_reranker()
+            ranked = reranker.rerank_query(query, candidates, corpus, top_k=top_k)
+            reranked = True
+        else:
+            ranked = [(doc_id, base_scores.get(doc_id)) for doc_id in candidates[:top_k]]
 
-    # Step 3: Reranking
-    if enable_reranker:
-        reranked_pairs = reranker_model.rerank_query(user_query, cands, corpus, top_k=top_k)
-    else:
-        reranked_pairs = [(cid, 1.0 / (i + 1)) for i, cid in enumerate(cands[:top_k])]
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        st.subheader("Retrieved results")
+        a, b, c = st.columns(3)
+        a.metric("Method", method + (" + reranker" if reranked else ""))
+        b.metric("Returned", len(ranked))
+        c.metric("Retrieval latency", f"{elapsed_ms:.1f} ms")
+        st.write(f"**Query:** {query}")
+        if filter_version:
+            st.info(f"Version constraint applied: {filter_version}")
+        elif intent:
+            st.caption(f"Detected intent: {', '.join(intent.keys())}")
 
-    elapsed_ms = (time.time() - start_t) * 1000
-
-    st.success(f"Retrieved top {len(reranked_pairs)} results in **{elapsed_ms:.1f} ms**")
-
-    # Display Metrics & Intent Analysis
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Method", method)
-    col2.metric("Reranking", "Enabled" if enable_reranker else "Disabled")
-    intent = parse_version_intent(user_query)
-    col3.metric("Detected Version Intent", str(intent.get("version") or "None"))
-
-    st.markdown("---")
-    st.markdown("### 🏆 Top Ranked Code Snippets")
-
-    for rank, (cid, score) in enumerate(reranked_pairs, start=1):
-        doc = corpus.get(cid, {})
-        text = doc.get("text", "")
-        meta = doc.get("meta_information") or doc.get("metadata") or {}
-
-        with st.expander(f"Rank {rank} | ID: {cid} | Score: {score:.4f}", expanded=(rank == 1)):
-            col_a, col_b, col_c = st.columns(3)
-            col_a.write(f"**Language:** `{meta.get('language') or 'code'}`")
-            col_b.write(f"**Version:** `{meta.get('version') or 'N/A'}`")
-            col_c.write(f"**Deprecated:** `{meta.get('deprecated', False)}`")
-
-            if meta.get("replacement"):
-                st.info(f"💡 Recommended Replacement API: `{meta.get('replacement')}`")
-
-            st.code(text, language=str(meta.get("language", "python")).lower())
+        if not ranked:
+            st.info("No matching code records were found. Try a broader query or remove the version filter.")
+        for rank, (doc_id, score) in enumerate(ranked, start=1):
+            doc = corpus.get(doc_id, {})
+            metadata = doc.get("metadata") or doc.get("meta_information") or {}
+            title = metadata.get("file") or doc.get("title") or doc_id
+            score_label = f"Score {score:.4f}" if score is not None else "Ranked by retrieval order"
+            with st.container(border=True):
+                st.markdown(f"**{rank}. {title}** · `{doc_id}` · {score_label}")
+                details = [metadata.get("language") or doc.get("language"), metadata.get("version"), metadata.get("repository")]
+                details = [str(value) for value in details if value]
+                if details:
+                    st.caption(" · ".join(details))
+                if metadata.get("deprecated"):
+                    replacement = metadata.get("replacement")
+                    st.warning(f"Deprecated API{f' · replacement: {replacement}' if replacement else ''}")
+                st.code(doc.get("text", ""), language=(metadata.get("language") or doc.get("language") or "text").lower())
+    except Exception as exc:
+        st.error(f"Search failed: {exc}")
+else:
+    st.info("Enter a coding question or choose an example, then select Search code.")

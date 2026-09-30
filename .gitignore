@@ -20,10 +20,21 @@ build/
 .pytest_cache/
 *.cpython-*-pytest-*.pyc
 
-# Embedding caches (large binary files — regenerate locally)
-cache/*.npy
+# Downloaded models, embedding caches, and generated indexes
+cache/
+indexes/
+models/
+.model_cache/
+hf_cache/
 
-# Results (machine-generated)
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Generated evaluation output
 results/
 
 # Jupyter
@@ -35,5 +46,7 @@ results/
 *.DS_Store
 Thumbs.db
 
-# Scratch files
+# Scratch and temporary files
 scratch/
+*.tmp
+*.log

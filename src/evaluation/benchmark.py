@@ -1,5 +1,7 @@
 import json
 import time
+import platform
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -15,6 +17,17 @@ from ..config.settings import get_settings
 from ..utils.logging import get_logger
 
 logger = get_logger("nexus.benchmark")
+
+
+def _package_versions() -> Dict[str, Optional[str]]:
+    packages = ("numpy", "faiss-cpu", "sentence-transformers", "transformers", "torch", "rank-bm25", "datasets", "mteb")
+    versions: Dict[str, Optional[str]] = {}
+    for package in packages:
+        try:
+            versions[package] = version(package)
+        except PackageNotFoundError:
+            versions[package] = None
+    return versions
 
 
 class BenchmarkRunner:
@@ -70,6 +83,21 @@ class BenchmarkRunner:
             "queries_count": len(self.queries),
             "corpus_count": len(self.corpus),
             "limit": self.limit,
+            "configuration": {
+                "dense_model": self.settings.dense_model_name,
+                "dense_batch_size": self.settings.dense_batch_size,
+                "device": self.settings.device,
+                "top_k": self.settings.top_k,
+                "candidate_count": self.settings.candidate_count,
+                "bm25": {"k1": self.settings.bm25_k1, "b": self.settings.bm25_b},
+                "rrf_k": self.settings.rrf_k,
+                "reranker_model": self.settings.reranker_model_name,
+            },
+            "environment": {
+                "python": platform.python_version(),
+                "platform": platform.platform(),
+                "packages": _package_versions(),
+            },
             "methods": {},
         }
 
@@ -97,10 +125,7 @@ class BenchmarkRunner:
         t0 = time.time()
         dense_results = self.dense_retriever.retrieve(self.queries, top_k=self.settings.candidate_count)
         dense_retrieval_latency = (time.time() - t0) / len(self.queries) * 1000  # ms per query
-        dense_metrics = evaluate_metrics(
-            {qid: res[: self.settings.top_k] for qid, res in dense_results.items()},
-            self.qrels,
-        )
+        dense_metrics = evaluate_metrics(dense_results, self.qrels)
         report["methods"]["dense"] = {
             "metrics": dense_metrics,
             "indexing_time_s": round(dense_indexing_time, 3),
@@ -112,10 +137,7 @@ class BenchmarkRunner:
         t0 = time.time()
         bm25_results = self.bm25_retriever.retrieve_batch(self.queries, top_k=self.settings.candidate_count)
         bm25_retrieval_latency = (time.time() - t0) / len(self.queries) * 1000
-        bm25_metrics = evaluate_metrics(
-            {qid: res[: self.settings.top_k] for qid, res in bm25_results.items()},
-            self.qrels,
-        )
+        bm25_metrics = evaluate_metrics(bm25_results, self.qrels)
         report["methods"]["bm25"] = {
             "metrics": bm25_metrics,
             "indexing_time_s": round(bm25_indexing_time, 3),
@@ -134,10 +156,7 @@ class BenchmarkRunner:
         hybrid_retrieval_latency = (time.time() - t0) / len(self.queries) * 1000 + (
             dense_retrieval_latency + bm25_retrieval_latency
         )
-        hybrid_metrics = evaluate_metrics(
-            {qid: res[: self.settings.top_k] for qid, res in hybrid_results.items()},
-            self.qrels,
-        )
+        hybrid_metrics = evaluate_metrics(hybrid_results, self.qrels)
         report["methods"]["hybrid"] = {
             "metrics": hybrid_metrics,
             "latency_per_query_ms": round(hybrid_retrieval_latency, 2),
@@ -151,7 +170,7 @@ class BenchmarkRunner:
             self.queries,
             hybrid_results,
             self.corpus,
-            top_k=self.settings.top_k,
+            top_k=self.settings.candidate_count,
         )
         rerank_latency = (time.time() - t0) / len(self.queries) * 1000
         rerank_metrics = evaluate_metrics(reranked_results, self.qrels)
@@ -192,16 +211,18 @@ class BenchmarkRunner:
                 f"{m['recall@10']:.4f} | {m['recall@100']:.4f} | {lat:.2f} ms |"
             )
 
-        md_lines.extend(
-            [
-                "",
-                "## Methodology & Configuration",
-                "- **Dense Model**: `intfloat/e5-base-v2` with FAISS inner-product similarity.",
-                "- **BM25 Parameters**: $k_1 = 1.5, b = 0.75$ with code symbol tokenization.",
-                "- **Hybrid Fusion**: Reciprocal Rank Fusion (RRF) with $k = 60$.",
-                "- **Cross-Encoder Reranker**: `cross-encoder/ms-marco-MiniLM-L-6-v2` top-candidate reranking.",
-            ]
-        )
+        config = report.get("configuration", {})
+        env = report.get("environment", {})
+        md_lines.extend([
+            "", "## Methodology & Configuration",
+            f"- **Dense model / batch / device**: `{config.get('dense_model')}` / `{config.get('dense_batch_size')}` / `{config.get('device')}`",
+            f"- **Top-K / candidate count**: `{config.get('top_k')}` / `{config.get('candidate_count')}`",
+            f"- **BM25 k1 / b**: `{config.get('bm25', {}).get('k1')}` / `{config.get('bm25', {}).get('b')}`",
+            f"- **RRF k**: `{config.get('rrf_k')}`",
+            f"- **Cross-encoder reranker**: `{config.get('reranker_model')}`",
+            f"- **Python / platform**: `{env.get('python')}` / `{env.get('platform')}`",
+            "- **Package versions**: " + ", ".join(f"`{name}={ver or 'not installed'}`" for name, ver in env.get("packages", {}).items()),
+        ])
 
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))

@@ -1,9 +1,11 @@
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Dict, Any, List, Optional
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .schemas import (
     RetrieveRequest,
@@ -33,7 +35,17 @@ STATE: Dict[str, Any] = {
     "reranker": None,
     "version_filter": None,
     "loaded": False,
+    "dataset": None,
 }
+
+SUPPORTED_DATASETS = {"coir", "samsung_demo"}
+
+
+def _configured_dataset() -> str:
+    dataset = os.getenv("NEXUS_DATASET", "coir").strip().lower()
+    if dataset not in SUPPORTED_DATASETS:
+        raise ValueError(f"NEXUS_DATASET must be one of: {', '.join(sorted(SUPPORTED_DATASETS))}")
+    return dataset
 
 
 def load_system_indexes(dataset: str = "coir", force: bool = False):
@@ -41,12 +53,14 @@ def load_system_indexes(dataset: str = "coir", force: bool = False):
     logger.info(f"Loading system indices (Dataset: {dataset})...")
     settings = get_settings()
 
+    dataset = dataset.strip().lower()
+    if dataset not in SUPPORTED_DATASETS:
+        raise ValueError(f"Unsupported dataset '{dataset}'. Choose coir or samsung_demo.")
+    STATE["loaded"] = False
     if dataset == "samsung_demo":
         _, corpus = load_samsung_demo_data()
     else:
         _, corpus, _ = load_coir(split="test")
-
-    STATE["corpus"] = corpus
 
     # Build Dense Index
     dense_retriever = DenseE5Retriever(
@@ -54,16 +68,19 @@ def load_system_indexes(dataset: str = "coir", force: bool = False):
         batch_size=settings.dense_batch_size,
     )
     dense_retriever.build_index(corpus, force_rebuild=force)
-    STATE["dense_retriever"] = dense_retriever
 
     # Build BM25 Index
     bm25 = BM25Retriever(k1=settings.bm25_k1, b=settings.bm25_b)
     bm25.fit(corpus)
-    STATE["bm25_retriever"] = bm25
-
-    # Reranker
-    STATE["reranker"] = CodeReranker(model_name=settings.reranker_model_name)
-    STATE["version_filter"] = VersionAwareFilter()
+    # Publish the complete state together so requests never see partial indexes.
+    STATE.update({
+        "corpus": corpus,
+        "dense_retriever": dense_retriever,
+        "bm25_retriever": bm25,
+        "reranker": CodeReranker(model_name=settings.reranker_model_name),
+        "version_filter": VersionAwareFilter(),
+        "dataset": dataset,
+    })
     STATE["loaded"] = True
     logger.info("System models and indices loaded successfully!")
 
@@ -71,7 +88,8 @@ def load_system_indexes(dataset: str = "coir", force: bool = False):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI Lifespan handler: initialize models once at server startup."""
-    load_system_indexes(dataset="coir", force=False)
+    if not STATE["loaded"]:
+        load_system_indexes(dataset=_configured_dataset(), force=False)
     yield
     logger.info("Shutting down Nexus Retrieval API server...")
 
@@ -96,11 +114,15 @@ app.add_middleware(
 def health():
     """Health check endpoint."""
     uptime = time.time() - START_TIME
-    return HealthResponse(
-        status="ok",
+    status = "ok" if STATE["loaded"] else "not_ready"
+    payload = HealthResponse(
+        status=status,
         version="1.0.0",
         uptime_seconds=round(uptime, 2),
     )
+    if not STATE["loaded"]:
+        return JSONResponse(status_code=503, content=payload.model_dump())
+    return payload
 
 
 @app.get("/info", response_model=InfoResponse)
@@ -122,15 +144,28 @@ def retrieve(req: RetrieveRequest):
     if not STATE["loaded"]:
         raise HTTPException(status_code=503, detail="Index not loaded yet.")
 
+    requested_dataset = req.dataset.strip().lower()
+    if requested_dataset not in SUPPORTED_DATASETS:
+        raise HTTPException(status_code=422, detail="dataset must be 'coir' or 'samsung_demo'.")
+    if requested_dataset != STATE["dataset"]:
+        raise HTTPException(
+            status_code=409,
+            detail=(f"API is initialized for '{STATE['dataset']}'. Set NEXUS_DATASET={requested_dataset} "
+                    "and restart, or rebuild indexes for that dataset before querying."),
+        )
+
     start_time = time.time()
     corpus = STATE["corpus"]
     query_text = req.query
     query_obj = {"q1": {"text": query_text}}
     method = req.method.lower()
+    rerank_enabled = req.rerank or method == "hybrid-rerank"
 
     # 1. Base Retrieval
     candidate_cids: List[str] = []
 
+    if method not in {"dense", "bm25", "hybrid", "hybrid-rerank"}:
+        raise HTTPException(status_code=422, detail="method must be dense, bm25, hybrid, or hybrid-rerank.")
     if method == "dense":
         res = STATE["dense_retriever"].retrieve(query_obj, top_k=50)
         candidate_cids = res.get("q1", [])
@@ -156,7 +191,7 @@ def retrieve(req: RetrieveRequest):
     # 3. Reranking
     results: List[CodeResult] = []
 
-    if req.rerank or method == "hybrid-rerank":
+    if rerank_enabled:
         reranked_pairs = STATE["reranker"].rerank_query(query_text, candidate_cids, corpus, top_k=req.top_k)
         for rank_idx, (cid, score) in enumerate(reranked_pairs, start=1):
             doc = corpus.get(cid, {})
@@ -189,7 +224,7 @@ def retrieve(req: RetrieveRequest):
     return RetrieveResponse(
         query=query_text,
         method=method,
-        rerank=req.rerank,
+        rerank=rerank_enabled,
         version=req.version,
         total=len(results),
         latency_ms=round(elapsed_ms, 2),
@@ -200,5 +235,9 @@ def retrieve(req: RetrieveRequest):
 @app.post("/index/rebuild")
 def rebuild_index(background_tasks: BackgroundTasks, dataset: str = "coir"):
     """Trigger asynchronous index rebuilding."""
+    dataset = dataset.strip().lower()
+    if dataset not in SUPPORTED_DATASETS:
+        raise HTTPException(status_code=422, detail="dataset must be 'coir' or 'samsung_demo'.")
+    STATE["loaded"] = False
     background_tasks.add_task(load_system_indexes, dataset=dataset, force=True)
     return {"status": "accepted", "message": f"Index rebuild triggered for dataset '{dataset}'"}

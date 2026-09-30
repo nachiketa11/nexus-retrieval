@@ -19,3 +19,12 @@ def test_version_filter_candidates():
 
     filtered = v_filter.filter_candidates(["doc1", "doc2"], corpus, version="3.0")
     assert filtered == ["doc2"]
+
+
+def test_version_filter_accepts_major_version_for_dotted_metadata():
+    v_filter = VersionAwareFilter()
+    corpus = {
+        "v3": {"metadata": {"version": "3.0"}},
+        "v2": {"metadata": {"version": "2.1"}},
+    }
+    assert v_filter.filter_candidates(["v3", "v2"], corpus, version="3") == ["v3"]

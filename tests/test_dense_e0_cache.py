@@ -3,9 +3,20 @@ import builtins
 import re
 from typing import Dict
 
+import numpy as np
 import pytest
 
 from src.retrieval import dense_e0
+
+
+class DummySentenceTransformer:
+    """Lightweight stand-in to exercise disk caching without model inference."""
+
+    def __init__(self, model_name):
+        self.model_name = model_name
+
+    def encode(self, texts, batch_size=32, show_progress_bar=False, normalize_embeddings=True):
+        return np.ones((len(texts), 4), dtype=np.float32)
 
 # Helper to compute cache file paths for the test split
 def _cache_file(name: str) -> str:
@@ -29,7 +40,9 @@ def clean_cache():
         if os.path.exists(path):
             os.remove(path)
 
-def test_cache_creation_and_load(capsys):
+def test_cache_creation_and_load(capsys, monkeypatch):
+    monkeypatch.setattr(dense_e0, "SentenceTransformer", DummySentenceTransformer)
+    monkeypatch.setattr(dense_e0, "_load_model", lambda model_name="intfloat/e5-base-v2": DummySentenceTransformer(model_name))
     # Minimal corpus and queries – enough to trigger encoding
     corpus = {"doc1": {"text": "def foo(): pass"}}
     queries = {"q1": {"text": "how to write a function?"}}

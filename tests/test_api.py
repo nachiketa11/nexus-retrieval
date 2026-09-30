@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+import importlib
 from fastapi.testclient import TestClient
 
 from src.api.app import app, STATE, load_system_indexes
@@ -30,6 +31,20 @@ def test_health_endpoint():
         assert "uptime_seconds" in data
 
 
+def test_health_reports_not_ready(monkeypatch):
+    api_module = importlib.import_module("src.api.app")
+    monkeypatch.setattr(api_module, "load_system_indexes", lambda **kwargs: None)
+    previous = STATE["loaded"]
+    STATE["loaded"] = False
+    try:
+        with TestClient(app) as client:
+            response = client.get("/health")
+            assert response.status_code == 503
+            assert response.json()["status"] == "not_ready"
+    finally:
+        STATE["loaded"] = previous
+
+
 def test_info_endpoint():
     with TestClient(app) as client:
         response = client.get("/info")
@@ -54,3 +69,20 @@ def test_retrieve_endpoint():
         assert data["query"] == payload["query"]
         assert "results" in data
         assert len(data["results"]) <= 5
+
+
+def test_retrieve_rejects_dataset_not_loaded():
+    with TestClient(app) as client:
+        response = client.post("/retrieve", json={
+            "query": "parse JSON response", "method": "bm25", "dataset": "coir"
+        })
+        assert response.status_code == 409
+        assert "initialized for 'samsung_demo'" in response.json()["detail"]
+
+
+def test_retrieve_rejects_unsupported_method():
+    with TestClient(app) as client:
+        response = client.post("/retrieve", json={
+            "query": "parse JSON response", "method": "chat", "dataset": "samsung_demo"
+        })
+        assert response.status_code == 422

@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 from typing import Dict, List, Tuple, Optional
 import numpy as np
 import faiss
@@ -27,11 +28,24 @@ def _prepare_texts(texts: List[str], prefix: str) -> List[str]:
     return [f"{prefix} {t}" for t in texts]
 
 
-def _cache_path(name: str, model_name: str, split: str) -> str:
-    """Generate deterministic embedding cache path."""
+def _cache_path(name: str, model_name: str, split: str, fingerprint: str = "") -> str:
+    """Generate a deterministic cache path including source/config identity."""
     settings = get_settings()
-    safe_model = model_name.replace("/", "_")
-    return str(settings.cache_dir / f"{name}_{safe_model}_{split}.npy")
+    safe_model = model_name.replace("/", "_").replace("\\", "_")
+    suffix = f"_{fingerprint}" if fingerprint else ""
+    return str(settings.cache_dir / f"{name}_{safe_model}_{split}{suffix}.npy")
+
+
+def _corpus_fingerprint(corpus: Dict[str, Dict], model_name: str, batch_size: int) -> str:
+    """Hash ordered IDs, exact passage text, and embedding configuration."""
+    digest = hashlib.sha256()
+    digest.update(f"model={model_name}\0batch_size={batch_size}\0prefix=passage:\0".encode())
+    for corpus_id in corpus:
+        digest.update(corpus_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(corpus[corpus_id].get("text", "")).encode("utf-8"))
+        digest.update(b"\0")
+    return digest.hexdigest()[:20]
 
 
 class DenseE5Retriever:
@@ -67,12 +81,13 @@ class DenseE5Retriever:
             for cid in self.corpus_ids
         ]
 
-        cache_file = _cache_path("corpus", self.model_name, self.split)
+        fingerprint = _corpus_fingerprint(corpus, self.model_name, self.batch_size)
+        cache_file = _cache_path("corpus", self.model_name, self.split, fingerprint)
 
         embeddings = None
         if not force_rebuild and os.path.exists(cache_file):
-            cached = np.load(cache_file)
-            if cached.shape[0] == len(texts):
+            cached = np.load(cache_file, allow_pickle=False)
+            if cached.ndim == 2 and cached.shape[0] == len(texts):
                 logger.info(f"Loaded corpus embeddings from cache: {os.path.basename(cache_file)}")
                 embeddings = cached.astype(np.float32)
 

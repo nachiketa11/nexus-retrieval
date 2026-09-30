@@ -1,4 +1,5 @@
 from src.retrieval.hybrid import reciprocal_rank_fusion, hybrid_retrieve
+from src.evaluation.metrics import evaluate
 
 
 def test_reciprocal_rank_fusion_scoring():
@@ -25,3 +26,10 @@ def test_hybrid_retrieve_batch():
     assert "q1" in hybrid_res
     assert len(hybrid_res["q1"]) == 3
     assert set(hybrid_res["q1"]) == {"doc1", "doc2", "doc3"}
+
+
+def test_recall_at_100_uses_results_beyond_top_10():
+    ranking = [f"doc{i}" for i in range(1, 12)]
+    metrics = evaluate({"q1": ranking}, {"q1": ["doc11"]})
+    assert metrics["recall@10"] == 0.0
+    assert metrics["recall@100"] == 1.0
