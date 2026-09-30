@@ -1,0 +1,39 @@
+# Virtual environment
+venv/
+.venv/
+env/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyc
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+*.egg
+
+# pytest
+.pytest_cache/
+*.cpython-*-pytest-*.pyc
+
+# Embedding caches (large binary files — regenerate locally)
+cache/*.npy
+
+# Results (machine-generated)
+results/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Editor / OS
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# Scratch files
+scratch/
