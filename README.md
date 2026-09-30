@@ -10,6 +10,17 @@ Finding a useful code example often requires matching intent expressed in natura
 
 NEXUS exposes complementary retrieval methods through one pipeline. Dense retrieval handles semantic similarity, BM25 matches identifiers and tokens, reciprocal-rank fusion combines their candidate rankings, and an optional cross-encoder reorders candidates. A metadata-aware stage can filter or boost candidates for version and deprecation intent.
 
+## PRISM GenAI Hackathon Submission
+
+**Hackathon Tag:** `PRISM_GENAI_HACKATHON_Y2026`
+
+### Submission Resources
+
+- **Demo Video:** [Watch the demo on YouTube](https://youtu.be/zN9a6G7nTWU)
+- **Presentation:** [View the PRISM submission PPT](docs/Nexus_Retrieval_PRISM_Submission.pptx)
+- **AI Disclosure:** [View the AI Usage Disclosure Form](<docs/AI Usage DISCLOSURE FORM.docx>)
+- **Source Code:** This GitHub repository contains the project code and `requirements.txt`.
+
 ## Architecture
 
 ```text
