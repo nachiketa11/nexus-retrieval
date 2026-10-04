@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from .schemas import (
+    AgentRequest,
     RetrieveRequest,
     RetrieveResponse,
     CodeResult,
@@ -16,6 +17,7 @@ from .schemas import (
 )
 from ..data.coir import load_coir
 from ..data.samsung_demo import load_samsung_demo_data
+from ..agent import NexusAgent
 from ..retrieval.dense import DenseE5Retriever
 from ..retrieval.bm25 import BM25Retriever
 from ..retrieval.hybrid import hybrid_retrieve
@@ -97,7 +99,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Nexus Code Retrieval API",
     description="Production-grade Code Retrieval & Reranking Service for Samsung PRISM",
-    version="1.0.0",
+    version="2.0.0",
     lifespan=lifespan,
 )
 
@@ -180,7 +182,15 @@ def retrieve(req: RetrieveRequest):
         fused = hybrid_retrieve(dense_res, bm25_res, top_k=50)
         candidate_cids = fused.get("q1", [])
 
-    # 2. Version Filtering / Boosting
+    # 2. Reranking (before the metadata policy so version/deprecation boosts are not discarded)
+    scores: Dict[str, float] = {}
+    if rerank_enabled and candidate_cids:
+        head = candidate_cids[: max(req.top_k * 3, 30)]
+        reranked_pairs = STATE["reranker"].rerank_query(query_text, head, corpus, top_k=len(head))
+        scores = {cid: float(score) for cid, score in reranked_pairs}
+        candidate_cids = [cid for cid, _ in reranked_pairs] + candidate_cids[len(head):]
+
+    # 3. Version Filtering / Boosting
     v_filter: VersionAwareFilter = STATE["version_filter"]
     if req.version:
         candidate_cids = v_filter.filter_candidates(candidate_cids, corpus, version=req.version)
@@ -188,36 +198,19 @@ def retrieve(req: RetrieveRequest):
         boosted = v_filter.rerank_by_metadata_match(candidate_cids, corpus, query_text)
         candidate_cids = [cid for cid, _ in boosted]
 
-    # 3. Reranking
     results: List[CodeResult] = []
-
-    if rerank_enabled:
-        reranked_pairs = STATE["reranker"].rerank_query(query_text, candidate_cids, corpus, top_k=req.top_k)
-        for rank_idx, (cid, score) in enumerate(reranked_pairs, start=1):
-            doc = corpus.get(cid, {})
-            meta = doc.get("meta_information") or doc.get("metadata") or {}
-            results.append(
-                CodeResult(
-                    doc_id=cid,
-                    rank=rank_idx,
-                    score=float(score),
-                    text=doc.get("text", ""),
-                    metadata=meta,
-                )
+    for rank_idx, cid in enumerate(candidate_cids[: req.top_k], start=1):
+        doc = corpus.get(cid, {})
+        meta = doc.get("meta_information") or doc.get("metadata") or {}
+        results.append(
+            CodeResult(
+                doc_id=cid,
+                rank=rank_idx,
+                score=scores.get(cid, 1.0 / rank_idx),
+                text=doc.get("text", ""),
+                metadata=meta,
             )
-    else:
-        for rank_idx, cid in enumerate(candidate_cids[: req.top_k], start=1):
-            doc = corpus.get(cid, {})
-            meta = doc.get("meta_information") or doc.get("metadata") or {}
-            results.append(
-                CodeResult(
-                    doc_id=cid,
-                    rank=rank_idx,
-                    score=1.0 / rank_idx,
-                    text=doc.get("text", ""),
-                    metadata=meta,
-                )
-            )
+        )
 
     elapsed_ms = (time.time() - start_time) * 1000
 
@@ -230,6 +223,31 @@ def retrieve(req: RetrieveRequest):
         latency_ms=round(elapsed_ms, 2),
         results=results,
     )
+
+
+@app.post("/agent")
+def agent(req: AgentRequest):
+    """Agentic retrieval: analyse, plan, retrieve, resolve versions/deprecations, self-check, refine."""
+    if not STATE["loaded"]:
+        raise HTTPException(status_code=503, detail="Index not loaded yet.")
+    corpus = STATE["corpus"]
+    dense_retriever = STATE["dense_retriever"]
+    reranker = STATE["reranker"]
+
+    def dense_fn(query: str, k: int):
+        ranked = dense_retriever.retrieve({"q": {"text": query}}, top_k=k).get("q", [])
+        return [(cid, 1.0 / rank) for rank, cid in enumerate(ranked, start=1)]
+
+    def rerank_fn(query: str, ids):
+        return reranker.rerank_query(query, list(ids), corpus, top_k=len(ids))
+
+    nexus_agent = NexusAgent(
+        corpus,
+        bm25=STATE["bm25_retriever"],
+        dense=dense_fn if req.use_dense else None,
+        reranker=rerank_fn if req.rerank is not False else None,
+    )
+    return nexus_agent.run(req.query, top_k=req.top_k, version=req.version, use_rerank=req.rerank)
 
 
 @app.post("/index/rebuild")

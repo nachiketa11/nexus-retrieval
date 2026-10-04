@@ -3,18 +3,57 @@ import sys
 import time
 from typing import Dict, List, Any
 
-from ..data.coir import load_coir
 from ..data.samsung_demo import load_samsung_demo_data
-from ..retrieval.dense import DenseE5Retriever
 from ..retrieval.bm25 import BM25Retriever
 from ..retrieval.hybrid import hybrid_retrieve
 from ..retrieval.version_aware import VersionAwareFilter, parse_version_intent
-from ..ranking.reranker import CodeReranker
-from ..evaluation.benchmark import BenchmarkRunner
 from ..config.settings import get_settings
 from ..utils.logging import get_logger
 
 logger = get_logger("nexus.cli")
+
+
+# Heavy dependencies (torch, sentence-transformers, FAISS, datasets/MTEB) load only when a
+# command needs them, so lexical and agent commands on the demo corpus stay lightweight.
+def load_coir(*args, **kwargs):
+    from ..data.coir import load_coir as _load_coir
+    return _load_coir(*args, **kwargs)
+
+
+def DenseE5Retriever(*args, **kwargs):  # noqa: N802 - keeps the original call sites unchanged
+    from ..retrieval.dense import DenseE5Retriever as _Dense
+    return _Dense(*args, **kwargs)
+
+
+def CodeReranker(*args, **kwargs):  # noqa: N802
+    from ..ranking.reranker import CodeReranker as _Reranker
+    return _Reranker(*args, **kwargs)
+
+
+def BenchmarkRunner(*args, **kwargs):  # noqa: N802
+    from ..evaluation.benchmark import BenchmarkRunner as _Runner
+    return _Runner(*args, **kwargs)
+
+
+def handle_agent(args: argparse.Namespace):
+    """Run the NEXUS agent on the demo corpus and print its reasoning trace."""
+    from ..serving import NexusEngine
+
+    engine = NexusEngine(enable_models=not args.lexical)
+    out = engine.agent(args.query, top_k=args.top_k, version=args.version, use_models=not args.lexical)
+    neural = engine.models_enabled and not args.lexical
+    print()
+    print(f"NEXUS agent  |  tools: {'BM25 + E5 + cross-encoder (ONNX)' if neural else 'BM25 + metadata policy'}")
+    print("=" * 78)
+    for step in out["trace"]:
+        print(f"[{step['phase'].upper():<7}] {step['tool']:<20} {step['thought']}")
+    print("=" * 78)
+    print(f"Confidence {out['confidence']:.2f} after {out['iterations']} iteration(s), {out['latency_ms']:.0f} ms")
+    print(out["answer"]["summary"])
+    for r in out["results"]:
+        meta = r["metadata"]
+        note = f"  <- {r['note']}" if r.get("note") else ""
+        print(f"  {r['rank']:>2}. {r['doc_id']:<28} {meta.get('file', '')}  v{meta.get('version', '?')}{note}")
 
 
 def handle_index(args: argparse.Namespace):
@@ -182,6 +221,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Target corpus dataset",
     )
 
+    # Agent command
+    agent_parser = subparsers.add_parser("agent", help="Agentic retrieval with a reasoning trace (demo corpus)")
+    agent_parser.add_argument("--query", type=str, required=True, help="Natural language query")
+    agent_parser.add_argument("--top-k", type=int, default=5, help="Number of snippets to return")
+    agent_parser.add_argument("--version", type=str, help="Hard version constraint (e.g. '3.0')")
+    agent_parser.add_argument("--lexical", action="store_true", help="Use BM25 only (no ONNX models)")
+
     # Evaluate command
     eval_parser = subparsers.add_parser("evaluate", help="Evaluate retrieval pipeline benchmark")
     eval_parser.add_argument(
@@ -204,6 +250,8 @@ def main():
         handle_index(args)
     elif args.command == "retrieve":
         handle_retrieve(args)
+    elif args.command == "agent":
+        handle_agent(args)
     elif args.command == "evaluate":
         handle_evaluate(args)
 

@@ -50,3 +50,7 @@ Thumbs.db
 scratch/
 *.tmp
 *.log
+
+# Vercel build output (python scripts/build_vercel.py)
+.vercel-build/
+.vercel/

@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NEXUS — Agentic Code Intelligence</title>
+<meta name="description" content="NEXUS is an agentic code retrieval system: it plans, searches with BM25 + E5 + cross-encoder, resolves SDK version and deprecation intent, checks its own confidence and explains every step.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23000'/%3E%3Ctext x='4' y='23' font-family='monospace' font-size='18' fill='%23e5342b'%3EN/%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root {
+  --bg:#000; --surface:#0b0b0b; --surface-2:#121212; --border:rgba(255,255,255,.13); --border-strong:rgba(255,255,255,.24);
+  --text:#f5f5f5; --dim:#8a8a8a; --faint:#555; --red:#e5342b; --red-dim:rgba(229,52,43,.14); --green:#3ecf8e; --amber:#f2b84b;
+  --mono:"JetBrains Mono","Cascadia Code",Consolas,monospace; --sans:"Space Grotesk","Segoe UI",system-ui,sans-serif;
+}
+* { box-sizing:border-box; }
+html,body { margin:0; }
+body { background:var(--bg); color:var(--text); font-family:var(--sans); min-height:100vh;
+  background-image:radial-gradient(rgba(255,255,255,.09) .55px, transparent .55px); background-size:20px 20px; }
+a { color:inherit; }
+button,input,select { font:inherit; color:inherit; }
+.wrap { max-width:1120px; margin:0 auto; padding:0 16px 64px; }
+@keyframes in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:none; } }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.45; } }
+@keyframes load { from { transform:translateX(-10%); } to { transform:translateX(290%); } }
+@keyframes grow { from { transform:scaleX(0); } to { transform:scaleX(1); } }
+
+nav { display:flex; justify-content:space-between; align-items:center; padding:22px 0; border-bottom:1px dashed var(--border); gap:12px; }
+.brand { display:flex; align-items:center; gap:12px; }
+.mark { font:500 15px var(--mono); color:var(--red); border:1px solid var(--red); padding:4px 7px; }
+.word { font-weight:600; letter-spacing:.32em; font-size:15px; }
+.sys { color:var(--dim); font:11px var(--mono); letter-spacing:.14em; }
+.status { font:11px var(--mono); letter-spacing:.12em; color:var(--dim); display:flex; align-items:center; gap:8px; }
+.dot { width:7px; height:7px; border-radius:50%; background:var(--amber); animation:pulse 1.6s infinite; }
+.dot.ok { background:var(--green); }
+.navlinks { display:flex; gap:16px; font:11px var(--mono); letter-spacing:.1em; }
+.navlinks a { color:var(--dim); text-decoration:none; } .navlinks a:hover { color:var(--text); }
+
+.hero { padding:56px 0 30px; animation:in .5s ease both; }
+.kicker { color:var(--red); font:11px var(--mono); letter-spacing:.2em; margin-bottom:18px; }
+h1 { font-size:clamp(38px,7vw,76px); line-height:.98; margin:0; font-weight:500; letter-spacing:-.03em; }
+h1 span { color:var(--dim); }
+.lede { max-width:680px; color:#b5b5b5; font-size:17px; line-height:1.6; margin-top:22px; }
+.chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:22px; }
+.chip { font:10.5px var(--mono); letter-spacing:.08em; color:#aaa; border:1px dashed var(--border-strong); padding:5px 9px; }
+
+.label { display:flex; gap:12px; align-items:center; color:var(--dim); font:11px var(--mono); letter-spacing:.16em; text-transform:uppercase; margin:34px 0 14px; }
+.label::after { content:""; flex:1; border-top:1px dashed var(--border); }
+
+.modes { display:inline-flex; border:1px solid var(--border-strong); }
+.modes button { background:transparent; border:0; padding:10px 18px; cursor:pointer; font:12px var(--mono); letter-spacing:.12em; color:var(--dim); }
+.modes button[aria-pressed=true] { background:var(--red); color:#fff; }
+.mode-note { color:var(--dim); font-size:14px; margin-top:10px; max-width:720px; line-height:1.55; }
+
+.terminal { border:1px dashed var(--border-strong); border-left:2px solid var(--red); background:linear-gradient(110deg,#0d0d0d,#070707); padding:18px; margin-top:16px; }
+.terminal:focus-within { border-color:rgba(229,52,43,.7); }
+.qrow { display:flex; gap:10px; align-items:center; }
+.prompt { color:var(--red); font:14px var(--mono); }
+#q { flex:1; min-width:0; background:transparent; border:0; outline:0; font:15px var(--mono); color:var(--text); padding:10px 0; }
+#q::placeholder { color:#555; }
+.run { background:var(--red); border:0; color:#fff; padding:11px 18px; font:12px var(--mono); letter-spacing:.12em; cursor:pointer; white-space:nowrap; }
+.run:disabled { opacity:.5; cursor:wait; }
+.opts { display:flex; flex-wrap:wrap; gap:14px 22px; align-items:center; margin-top:14px; padding-top:14px; border-top:1px dashed var(--border); font:12px var(--mono); color:#aaa; }
+.opts label { display:flex; align-items:center; gap:8px; }
+.opts select,.opts input[type=text],.opts input[type=number] { background:#050505; border:1px solid var(--border-strong); padding:6px 8px; font:12px var(--mono); }
+.opts input[type=text] { width:90px; } .opts input[type=number] { width:58px; }
+.opts input[type=checkbox] { accent-color:var(--red); }
+.hidden { display:none !important; }
+.examples { display:flex; flex-wrap:wrap; gap:8px; margin-top:14px; }
+.examples button { background:#0a0a0a; border:1px dashed var(--border-strong); color:#bbb; font:11.5px var(--mono); padding:6px 10px; cursor:pointer; text-align:left; }
+.examples button:hover { border-color:var(--red); color:#fff; }
+
+.loading { height:3px; background:#1d1d1d; overflow:hidden; margin-top:18px; }
+.loading::after { content:""; display:block; height:100%; width:30%; background:var(--red); animation:load 1s ease-in-out infinite alternate; }
+.loading-text { color:var(--dim); font:11px var(--mono); margin-top:8px; }
+.error { border:1px solid rgba(229,52,43,.5); background:var(--red-dim); padding:14px; font:13px var(--mono); margin-top:18px; color:#f3a29c; }
+
+.stats { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); border:1px dashed var(--border); background:rgba(8,8,8,.85); margin-top:28px; animation:in .4s ease both; }
+.stat { padding:13px 15px; border-right:1px dashed var(--border); min-width:0; }
+.stat:last-child { border-right:0; }
+.stat-l { color:#6c6c6c; font:10px var(--mono); letter-spacing:.12em; }
+.stat-v { margin-top:6px; font:14px var(--mono); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+
+.answer { border:1px solid var(--border-strong); background:linear-gradient(120deg,#111,#070707); padding:20px; margin-top:22px; animation:in .45s ease both; }
+.answer-top { display:flex; justify-content:space-between; gap:18px; flex-wrap:wrap; align-items:flex-start; }
+.answer h2 { margin:0; font-size:20px; font-weight:500; line-height:1.4; max-width:760px; }
+.conf { min-width:200px; }
+.conf-bar { height:6px; background:#222; margin-top:8px; overflow:hidden; }
+.conf-bar span { display:block; height:100%; transform-origin:left; animation:grow .7s ease both; }
+.migration { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:16px; }
+.mnode { font:12px var(--mono); padding:6px 10px; border:1px solid var(--border-strong); }
+.mnode.old { color:#f18b84; border-color:rgba(229,52,43,.45); background:var(--red-dim); text-decoration:line-through; text-decoration-color:rgba(241,139,132,.5); }
+.mnode.new { color:#8ef0c0; border-color:rgba(62,207,142,.5); background:rgba(62,207,142,.09); }
+.arrow { color:var(--faint); font-family:var(--mono); }
+
+.plan { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:16px; background:#070707; border-block:1px dashed var(--border); margin-top:22px; justify-content:center; }
+.pnode { font:11px var(--mono); letter-spacing:.06em; padding:7px 10px; border:1px solid #2b2b2b; color:#ccc; animation:in .35s ease both; }
+.pnode.on { border-color:var(--red); background:var(--red-dim); color:#fff; }
+
+.grid { display:grid; grid-template-columns:minmax(0,5fr) minmax(0,7fr); gap:24px; align-items:start; }
+.trace { list-style:none; margin:0; padding:0; border-left:1px dashed var(--border-strong); }
+.step { position:relative; padding:0 0 18px 20px; animation:in .4s ease both; }
+.step::before { content:""; position:absolute; left:-5px; top:5px; width:9px; height:9px; background:var(--bg); border:1px solid var(--red); }
+.step.phase-reflect::before { border-color:var(--amber); } .step.phase-respond::before { background:var(--green); border-color:var(--green); }
+.step-h { display:flex; gap:8px; align-items:baseline; flex-wrap:wrap; font:10.5px var(--mono); letter-spacing:.1em; color:var(--dim); }
+.phase { color:var(--red); } .step.phase-reflect .phase { color:var(--amber); } .step.phase-respond .phase { color:var(--green); }
+.tool { color:#ddd; }
+.ms { margin-left:auto; color:#555; }
+.thought { font-size:14px; line-height:1.55; color:#cfcfcf; margin-top:5px; overflow-wrap:anywhere; }
+details.detail { margin-top:6px; }
+details.detail summary { cursor:pointer; color:#666; font:10.5px var(--mono); }
+details.detail pre { background:#050505; border:1px dashed #262626; padding:10px; font:11px/1.5 var(--mono); color:#aaa; overflow:auto; max-height:220px; margin:6px 0 0; }
+
+.result { border:1px solid var(--border); background:linear-gradient(115deg,rgba(15,15,15,.97),rgba(7,7,7,.97)); margin-bottom:16px; padding:16px; animation:in .45s ease both; transition:border-color .2s; }
+.result:hover { border-color:rgba(229,52,43,.6); }
+.rhead { display:grid; grid-template-columns:44px minmax(0,1fr) auto; gap:10px; align-items:start; padding-bottom:12px; border-bottom:1px dashed var(--border); }
+.rank { font:26px/1 var(--mono); color:#555; }
+.result.top .rank { color:var(--red); }
+.path { font:14px/1.4 var(--mono); overflow-wrap:anywhere; }
+.docid { font:11px var(--mono); color:#6f6f6f; margin-top:3px; overflow-wrap:anywhere; }
+.score { font:11.5px var(--mono); color:#ccc; text-align:right; white-space:nowrap; }
+.score small { display:block; color:#666; font-size:10px; margin-top:3px; }
+.tags { display:flex; flex-wrap:wrap; gap:6px; padding:11px 0; }
+.tag { font:10.5px var(--mono); letter-spacing:.04em; color:#a0a0a0; border:1px dashed #333; padding:3px 7px; }
+.tag.warn { color:#f18b84; border-color:rgba(229,52,43,.45); background:var(--red-dim); }
+.tag.good { color:#8ef0c0; border-color:rgba(62,207,142,.45); background:rgba(62,207,142,.08); }
+.tag.sig { color:#8fb8ff; border-color:rgba(120,160,255,.35); }
+.note { font:12px var(--mono); color:var(--amber); margin-bottom:10px; }
+.code { margin:0; max-height:340px; overflow:auto; border:1px dashed #2a2a2a; background:#050505 !important; }
+.code code { font:12px/1.6 var(--mono) !important; padding:12px 14px !important; display:block; background:transparent !important; white-space:pre; }
+.empty { border:1px dashed var(--border); padding:22px; color:#8a8a8a; font:13px/1.7 var(--mono); background:#070707; margin-top:28px; }
+
+.how { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:0; border:1px dashed var(--border); }
+.how div { padding:16px; border-right:1px dashed var(--border); }
+.how div:last-child { border-right:0; }
+.how b { display:block; font:11px var(--mono); color:var(--red); letter-spacing:.14em; margin-bottom:8px; }
+.how p { margin:0; font-size:13.5px; line-height:1.5; color:#bdbdbd; }
+.bench { width:100%; border-collapse:collapse; font:12.5px var(--mono); }
+.bench th,.bench td { border-bottom:1px dashed var(--border); padding:10px 8px; text-align:right; }
+.bench th:first-child,.bench td:first-child { text-align:left; }
+.bench th { color:var(--dim); font-weight:400; letter-spacing:.08em; font-size:11px; }
+.bench tr.hl td { color:#fff; background:var(--red-dim); }
+.fine { color:#6d6d6d; font:11.5px/1.6 var(--mono); margin-top:10px; }
+footer { display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; border-top:1px dashed var(--border); margin-top:56px; padding-top:14px; color:#555; font:10.5px var(--mono); letter-spacing:.08em; }
+
+@media (max-width: 860px) {
+  .grid { grid-template-columns:minmax(0,1fr); }
+  .how { grid-template-columns:1fr 1fr; }
+  .how div { border-bottom:1px dashed var(--border); }
+  .stats { grid-template-columns:1fr 1fr; }
+  .stat { border-bottom:1px dashed var(--border); }
+  .sys,.navlinks { display:none; }
+}
+@media (max-width: 520px) {
+  .qrow { flex-wrap:wrap; } .run { width:100%; }
+  .rhead { grid-template-columns:32px minmax(0,1fr); } .score { grid-column:2; text-align:left; }
+  .how { grid-template-columns:1fr; }
+  .bench { font-size:11px; } .bench th,.bench td { padding:8px 4px; }
+}
+@media (prefers-reduced-motion: reduce) { *,*::before,*::after { animation:none !important; transition:none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <nav>
+    <div class="brand"><div class="mark">N/</div><div class="word">NEXUS</div><div class="sys">AGENTIC CODE INTELLIGENCE</div></div>
+    <div class="navlinks"><a href="#how">HOW IT WORKS</a><a href="#eval">EVALUATION</a><a href="/api/docs">API</a><a href="https://github.com/nachiketa11/nexus-retrieval">GITHUB</a></div>
+    <div class="status"><span class="dot" id="dot"></span><span id="status">CONNECTING</span></div>
+  </nav>
+
+  <section class="hero">
+    <div class="kicker">SAMSUNG PRISM · AGENTIC AI · RETRIEVAL SYSTEM / 002</div>
+    <h1>Find the code<br><span>behind the intent.</span></h1>
+    <p class="lede">NEXUS is a retrieval <em>agent</em> for developer code search. It reads your question, plans which tools to use, searches with lexical and semantic retrievers, understands SDK versions and deprecations, follows migration links to the current API, checks its own confidence, and shows every step it took.</p>
+    <div class="chips"><span class="chip">PLAN → ACT → REFLECT → REFINE</span><span class="chip">BM25 + E5 + RRF</span><span class="chip">CROSS-ENCODER RERANK</span><span class="chip">VERSION &amp; DEPRECATION AWARE</span><span class="chip">EXPLAINABLE TRACE</span></div>
+  </section>
+
+  <div class="label">01 / Mode</div>
+  <div class="modes" role="group" aria-label="Search mode">
+    <button type="button" id="mode-agent" aria-pressed="true">AGENT</button>
+    <button type="button" id="mode-pipeline" aria-pressed="false">PIPELINE</button>
+  </div>
+  <p class="mode-note" id="mode-note"></p>
+
+  <div class="label">02 / Query terminal</div>
+  <form class="terminal" id="form" autocomplete="off">
+    <div class="qrow">
+      <span class="prompt">&gt;_</span>
+      <input id="q" type="text" maxlength="500" placeholder="Describe the code you need, e.g. migrate legacy v1 step count reader to the new API" aria-label="Query">
+      <button class="run" id="run" type="submit">RUN ↗</button>
+    </div>
+    <div class="opts">
+      <label class="pipeline-only hidden">METHOD
+        <select id="method"><option value="hybrid">Hybrid RRF</option><option value="bm25">BM25</option><option value="dense">Dense E5</option></select>
+      </label>
+      <label class="pipeline-only hidden"><input type="checkbox" id="rerank"> Cross-encoder rerank</label>
+      <label class="agent-only"><input type="checkbox" id="models" checked> Neural tools (E5 + cross-encoder)</label>
+      <label>VERSION <input type="text" id="version" placeholder="e.g. 3.0" maxlength="20"></label>
+      <label>TOP-K <input type="number" id="topk" value="5" min="1" max="20"></label>
+    </div>
+    <div class="examples" id="examples" aria-label="Example queries"></div>
+  </form>
+
+  <div id="out"><div class="empty">AWAITING QUERY / Type a coding question or pick an example. The first neural query may take a few seconds while the models warm up.</div></div>
+
+  <div class="label" id="how">03 / How the agent works</div>
+  <div class="how">
+    <div><b>ANALYSE</b><p>Parses version, migration and deprecation intent, language, SDK family and code identifiers.</p></div>
+    <div><b>PLAN</b><p>Chooses tools: BM25, E5 dense, RRF fusion, cross-encoder, version policy, context boost.</p></div>
+    <div><b>ACT</b><p>Runs each tool and records inputs, top results and latency.</p></div>
+    <div><b>RESOLVE</b><p>Follows deprecation links so a legacy hit surfaces its current replacement and migration path.</p></div>
+    <div><b>REFLECT</b><p>Scores confidence from term coverage, retriever agreement, score margin and metadata; refines the query if low.</p></div>
+  </div>
+
+  <div class="label" id="eval">04 / Evaluation</div>
+  <table class="bench">
+    <thead><tr><th>SYSTEM</th><th>HIT@1</th><th>MRR</th><th>NDCG@10</th><th>RECALL@5</th></tr></thead>
+    <tbody>
+      <tr><td>BM25</td><td>0.792</td><td>0.882</td><td>0.912</td><td>1.000</td></tr>
+      <tr><td>Dense E5</td><td>0.750</td><td>0.868</td><td>0.902</td><td>1.000</td></tr>
+      <tr><td>Hybrid RRF</td><td>0.708</td><td>0.847</td><td>0.887</td><td>1.000</td></tr>
+      <tr><td>Hybrid RRF + cross-encoder</td><td>0.792</td><td>0.896</td><td>0.923</td><td>1.000</td></tr>
+      <tr class="hl"><td>NEXUS agent</td><td>1.000</td><td>1.000</td><td>1.000</td><td>1.000</td></tr>
+    </tbody>
+  </table>
+  <p class="fine">24 labelled queries over the 35-snippet Samsung/demo corpus (python scripts/eval_agent.py --onnx). This is a small hand-authored sanity set, not a public benchmark: it shows the effect of the agent's version, deprecation and migration reasoning. See the README for CoIR results.</p>
+
+  <footer><span>NEXUS / RETRIEVAL INTELLIGENCE · PRISM_GENAI_HACKATHON_Y2026</span><span>DEMO CORPUS IS SYNTHETIC · NOT AN OFFICIAL SAMSUNG DATASET</span></footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const LANG = { python: "python", java: "java", kotlin: "kotlin", typescript: "typescript", cpp: "cpp", c: "c" };
+  const FEATURED = [
+    "migrate legacy v1 step count reader to the new API",
+    "Find deprecated authentication API and its replacement",
+    "disable camera with Knox device policy, latest version",
+    "upgrade a Tizen Galaxy Watch app to the current platform",
+    "turn on lights when motion is detected",
+    "refresh OAuth access token before it expires",
+  ];
+  let mode = "agent";
+  let info = null;
+
+  const notes = {
+    agent: "The agent decides which tools to run, resolves version and deprecation intent, follows migration links and reports its confidence with a step-by-step trace.",
+    pipeline: "Run one retrieval method directly to compare against the agent. Scores are method-specific: BM25 score, cosine similarity, RRF score or cross-encoder logit.",
+  };
+
+  function setMode(next) {
+    mode = next;
+    $("mode-agent").setAttribute("aria-pressed", next === "agent");
+    $("mode-pipeline").setAttribute("aria-pressed", next === "pipeline");
+    document.querySelectorAll(".pipeline-only").forEach((el) => el.classList.toggle("hidden", next !== "pipeline"));
+    document.querySelectorAll(".agent-only").forEach((el) => el.classList.toggle("hidden", next !== "agent"));
+    $("mode-note").textContent = notes[next];
+  }
+  $("mode-agent").onclick = () => setMode("agent");
+  $("mode-pipeline").onclick = () => setMode("pipeline");
+  setMode("agent");
+
+  FEATURED.forEach((text) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = text;
+    b.onclick = () => { $("q").value = text; run(); };
+    $("examples").appendChild(b);
+  });
+
+  fetch("/api/info").then((r) => r.json()).then((d) => {
+    info = d;
+    $("dot").classList.add("ok");
+    $("status").textContent = `${d.corpus_size} SNIPPETS · ${d.models_enabled ? "NEURAL TOOLS ONLINE" : "LEXICAL MODE"}`;
+    if (!d.models_enabled) {
+      $("models").checked = false; $("models").disabled = true;
+      [...$("method").options].forEach((o) => { if (o.value !== "bm25") o.disabled = true; });
+      $("method").value = "bm25"; $("rerank").disabled = true;
+    }
+  }).catch(() => { $("status").textContent = "API UNREACHABLE"; });
+
+  $("form").addEventListener("submit", (e) => { e.preventDefault(); run(); });
+
+  async function run() {
+    const query = $("q").value.trim();
+    if (!query) { $("q").focus(); return; }
+    const topK = Math.max(1, Math.min(20, parseInt($("topk").value, 10) || 5));
+    const version = $("version").value.trim() || null;
+    const neural = mode === "agent" ? $("models").checked : ($("method").value !== "bm25" || $("rerank").checked);
+    $("run").disabled = true;
+    $("out").innerHTML = `<div class="loading" aria-label="Running"></div><div class="loading-text">${
+      neural && info && !info.models_loaded ? "WARMING UP E5 + CROSS-ENCODER (FIRST NEURAL QUERY ONLY)…" : (mode === "agent" ? "AGENT IS PLANNING AND SEARCHING…" : "SEARCHING…")}</div>`;
+    const started = performance.now();
+    try {
+      const body = mode === "agent"
+        ? { query, top_k: topK, version, use_models: $("models").checked }
+        : { query, top_k: topK, version, method: $("method").value, rerank: $("rerank").checked };
+      const res = await fetch(mode === "agent" ? "/api/agent" : "/api/search", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail));
+      if (info && neural) info.models_loaded = true;
+      const roundTrip = performance.now() - started;
+      $("out").innerHTML = mode === "agent" ? renderAgent(data, roundTrip) : renderPipeline(data, roundTrip);
+      document.querySelectorAll("pre.code code").forEach((el) => window.hljs && hljs.highlightElement(el));
+    } catch (err) {
+      $("out").innerHTML = `<div class="error">SEARCH FAILED / ${esc(err.message || err)}</div>`;
+    } finally {
+      $("run").disabled = false;
+    }
+  }
+
+  function stats(items) {
+    return `<div class="stats">${items.map(([l, v]) => `<div class="stat"><div class="stat-l">${esc(l)}</div><div class="stat-v" title="${esc(v)}">${esc(v)}</div></div>`).join("")}</div>`;
+  }
+
+  function renderAgent(d, roundTrip) {
+    const conf = d.confidence ?? 0;
+    const confColor = conf >= 0.7 ? "var(--green)" : conf >= 0.5 ? "var(--amber)" : "var(--red)";
+    const mig = d.answer && d.answer.migration;
+    const migHtml = mig ? `<div class="migration">${mig.path.map((id, i) => {
+      const last = i === mig.path.length - 1;
+      return `${i ? '<span class="arrow">→</span>' : ""}<span class="mnode ${last ? "new" : "old"}">${esc(mig.versions[i])} · ${esc(id)}</span>`;
+    }).join("")}</div>` : "";
+    const planHtml = `<div class="plan" aria-label="Agent plan">${["query", ...d.plan, "answer"].map((p, i) =>
+      `${i ? '<span class="arrow">→</span>' : ""}<span class="pnode on" style="animation-delay:${i * 60}ms">${esc(p.replace(/_/g, " ").toUpperCase())}</span>`).join("")}</div>`;
+    const trace = d.trace.map((s, i) => `
+      <li class="step phase-${esc(s.phase)}" style="animation-delay:${i * 50}ms">
+        <div class="step-h"><span class="phase">${esc(s.phase.toUpperCase())}</span><span class="tool">${esc(s.tool)}</span><span class="ms">${s.latency_ms ? s.latency_ms.toFixed(1) + " ms" : ""}</span></div>
+        <div class="thought">${esc(s.thought)}</div>
+        ${s.detail && Object.keys(s.detail).length ? `<details class="detail"><summary>details</summary><pre>${esc(JSON.stringify(s.detail, null, 2))}</pre></details>` : ""}
+      </li>`).join("");
+    return `
+      ${stats([["MODE", "AGENT"], ["CONFIDENCE", conf.toFixed(2)], ["ITERATIONS", d.iterations], ["SERVER LATENCY", d.latency_ms.toFixed(0) + " ms"], ["ROUND TRIP", roundTrip.toFixed(0) + " ms"]])}
+      <section class="answer">
+        <div class="answer-top">
+          <h2>${esc(d.answer.summary)}</h2>
+          <div class="conf"><div class="stat-l">SELF-ASSESSED CONFIDENCE · ${conf.toFixed(2)}</div><div class="conf-bar"><span style="width:${Math.round(conf * 100)}%;background:${confColor}"></span></div>
+          <div class="fine" style="margin-top:6px">${esc(d.confidence_signals && d.confidence_signals.explanation || "")}</div></div>
+        </div>
+        ${migHtml}
+        ${d.final_query !== d.query ? `<div class="fine">Refined query: ${esc(d.final_query)}</div>` : ""}
+      </section>
+      ${planHtml}
+      <div class="grid">
+        <div><div class="label" style="margin-top:8px">Reasoning trace</div><ol class="trace">${trace}</ol></div>
+        <div><div class="label" style="margin-top:8px">Ranked code</div>${results(d.results, "agent")}</div>
+      </div>`;
+  }
+
+  function renderPipeline(d, roundTrip) {
+    const intent = d.intent && Object.keys(d.intent).length ? Object.entries(d.intent).map(([k, v]) => `${k}=${v}`).join(" · ") : "none";
+    return `
+      ${stats([["METHOD", d.method.toUpperCase()], ["RESULTS", d.total], ["SERVER LATENCY", d.latency_ms.toFixed(0) + " ms"], ["INTENT", intent], ["ROUND TRIP", roundTrip.toFixed(0) + " ms"]])}
+      <div class="label">Ranked code candidates</div>${results(d.results, "pipeline")}`;
+  }
+
+  function results(list, kind) {
+    if (!list.length) return `<div class="empty">NO CANDIDATES / Broaden the query or remove the version constraint.</div>`;
+    const maxScore = Math.max(...list.map((r) => Math.abs(r.score ?? 0)), 1e-9);
+    return list.map((r, i) => {
+      const m = r.metadata || {};
+      const tags = [`<span class="tag">${esc((m.language || "code").toUpperCase())}</span>`];
+      if (m.library) tags.push(`<span class="tag">${esc(m.library)}</span>`);
+      if (m.version) tags.push(`<span class="tag">VERSION ${esc(m.version)}</span>`);
+      if (m.repository) tags.push(`<span class="tag">${esc(m.repository)}</span>`);
+      tags.push(m.deprecated ? `<span class="tag warn">DEPRECATED</span>` : `<span class="tag good">CURRENT</span>`);
+      if (m.replacement) tags.push(`<span class="tag warn">REPLACED BY ${esc(m.replacement)}</span>`);
+      const sig = r.signals || {};
+      const sigTags = [["bm25", "BM25"], ["dense", "COS"], ["rrf", "RRF"], ["rerank", "CE"]]
+        .filter(([k]) => sig[k] !== undefined).map(([k, l]) => `<span class="tag sig">${l} ${Number(sig[k]).toFixed(k === "rrf" ? 4 : 3)}</span>`).join("");
+      const scoreHtml = kind === "pipeline" && r.score !== null && r.score !== undefined
+        ? `SCORE ${Number(r.score).toFixed(4)}<small>${Math.round(Math.abs(r.score) / maxScore * 100)}% OF TOP</small>`
+        : `RANK ${r.rank}<small>${kind === "agent" ? "AGENT ORDER" : "RANK ORDER"}</small>`;
+      return `<article class="result ${i === 0 ? "top" : ""}" style="animation-delay:${i * 70}ms">
+        <div class="rhead"><div class="rank">${String(r.rank).padStart(2, "0")}</div>
+          <div><div class="path">${esc(m.file || r.doc_id)}</div><div class="docid">${esc(r.doc_id)}</div></div>
+          <div class="score">${scoreHtml}</div></div>
+        <div class="tags">${tags.join("")}${sigTags}</div>
+        ${r.note ? `<div class="note">↳ ${esc(r.note)}</div>` : ""}
+        <pre class="code"><code class="language-${LANG[m.language] || "plaintext"}">${esc((r.text || "").replace(/^\n+|\s+$/g, ""))}</code></pre>
+      </article>`;
+    }).join("");
+  }
+})();
+</script>
+</body>
+</html>

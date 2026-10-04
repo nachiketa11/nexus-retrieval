@@ -2,7 +2,13 @@ import os
 from typing import Dict, Tuple, List
 
 from datasets import load_dataset
-from mteb import get_tasks
+
+try:
+    from mteb import get_tasks
+except ImportError:  # MTEB is only used to look up the dataset path
+    get_tasks = None
+
+COIR_APPS_DATASET = "CoIR-Retrieval/apps"
 
 
 def _detect_dataset_identifier(task) -> str:
@@ -39,12 +45,13 @@ def load_coir(split: str = "test") -> Tuple[Dict[str, Dict], Dict[str, Dict], Di
         qrels:    query_id -> [doc_id, ...]
     The loader respects the requested split (train/test) in the default config.
     """
-    # 1️⃣ Resolve the task and dataset identifier via MTEB
-    tasks = get_tasks(tasks=["AppsRetrieval"])
-    if not tasks:
-        raise RuntimeError("AppsRetrieval task not found via mteb.get_tasks")
-    task = tasks[0]
-    dataset_path = _detect_dataset_identifier(task)
+    # 1️⃣ Resolve the task and dataset identifier via MTEB (falls back to the known HF path)
+    dataset_path = COIR_APPS_DATASET
+    if get_tasks is not None:
+        tasks = get_tasks(tasks=["AppsRetrieval"])
+        if not tasks:
+            raise RuntimeError("AppsRetrieval task not found via mteb.get_tasks")
+        dataset_path = _detect_dataset_identifier(tasks[0])
 
     # 2️⃣ Load the three configs of the dataset
     #    • default config holds relevance pairs (qrels) with a 'split' column

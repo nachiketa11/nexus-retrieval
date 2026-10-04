@@ -258,7 +258,9 @@ if submitted:
 
         candidates = [doc_id for doc_id, _ in scored]
         intent = parse_version_intent(query)
-        filter_version = explicit_version.strip() or intent.get("version")
+        # Only an explicit version is a hard filter; versions parsed from the query (which may be the
+        # version being migrated *from*) are handled by the metadata policy as soft boosts.
+        filter_version = explicit_version.strip().lstrip("vV")
         version_filter = VersionAwareFilter()
         if filter_version:
             candidates = version_filter.filter_candidates(candidates, corpus, version=filter_version)

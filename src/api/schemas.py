@@ -9,9 +9,17 @@ class RetrieveRequest(BaseModel):
         default="hybrid-rerank",
         description="Retrieval method: dense, bm25, hybrid, hybrid-rerank",
     )
-    rerank: bool = Field(default=True, description="Enable cross-encoder reranking")
+    rerank: bool = Field(default=False, description="Enable cross-encoder reranking (implied by hybrid-rerank)")
     version: Optional[str] = Field(default=None, description="Filter by library/SDK version")
     dataset: Literal["coir", "samsung_demo"] = Field(default="coir", description="Target corpus: coir or samsung_demo")
+
+
+class AgentRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Natural language code search query")
+    top_k: int = Field(default=5, ge=1, le=50)
+    version: Optional[str] = Field(default=None, description="Hard version constraint")
+    use_dense: bool = Field(default=True, description="Allow the agent to use dense retrieval")
+    rerank: Optional[bool] = Field(default=None, description="Force the cross-encoder on/off; None lets the agent decide")
 
 
 class CodeResult(BaseModel):

@@ -3,13 +3,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-CACHE_DIR = BASE_DIR / "cache"
+CACHE_DIR = Path(os.getenv("NEXUS_CACHE_DIR", BASE_DIR / "cache"))
 INDEX_DIR = BASE_DIR / "indexes"
 RESULTS_DIR = BASE_DIR / "results"
 
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-INDEX_DIR.mkdir(parents=True, exist_ok=True)
-RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+for _directory in (CACHE_DIR, INDEX_DIR, RESULTS_DIR):
+    try:
+        _directory.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        # Read-only filesystems (e.g. serverless bundles) only need these for offline runs.
+        pass
 
 
 @dataclass
