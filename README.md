@@ -9,7 +9,7 @@ NEXUS is an **agentic code retrieval system**. Given a developer's question, the
 **Hackathon Tag:** `PRISM_GENAI_HACKATHON_Y2026` · **Theme:** Agentic AI
 
 - **Live demo:** https://nexus-retrieval-two.vercel.app (API docs at `/api/docs`)
-- **Demo Video:** [Watch the demo on YouTube](https://youtu.be/zN9a6G7nTWU)
+- **Demo Video:** [Watch the demo on YouTube](https://youtu.be/zXi2QaELKTA)
 - **Presentation:** [View the PRISM submission PPT](docs/Nexus_Retrieval_PRISM_Submission.pptx)
 - **AI Disclosure:** [View the AI Usage Disclosure Form](<docs/AI Usage DISCLOSURE FORM.docx>)
 - **Source Code:** this repository (`requirements.txt` for the full stack; `scripts/build_vercel.py` for the serverless build).
