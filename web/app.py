@@ -20,7 +20,7 @@ from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 ROOT = Path(__file__).resolve().parent
 # Inside the Vercel bundle `src/` sits next to this file; in the repository it is one level up.
@@ -44,7 +44,17 @@ def engine() -> NexusEngine:
     return _engine
 
 
-class SearchRequest(BaseModel):
+class _QueryModel(BaseModel):
+    @field_validator("query", check_fields=False)  # `query` is declared on each subclass
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("query must contain non-whitespace characters")
+        return value
+
+
+class SearchRequest(_QueryModel):
     query: str = Field(..., min_length=1, max_length=500)
     method: Literal["bm25", "dense", "hybrid"] = "hybrid"
     rerank: bool = False
@@ -52,7 +62,7 @@ class SearchRequest(BaseModel):
     version: Optional[str] = Field(default=None, max_length=20)
 
 
-class AgentRequest(BaseModel):
+class AgentRequest(_QueryModel):
     query: str = Field(..., min_length=1, max_length=500)
     top_k: int = Field(default=5, ge=1, le=20)
     version: Optional[str] = Field(default=None, max_length=20)

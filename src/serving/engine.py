@@ -104,6 +104,9 @@ class NexusEngine:
         started = time.perf_counter()
         scores: Dict[str, Dict[str, float]] = {}
         lexical = self.bm25.retrieve(query, top_k=50)
+        if method == "bm25":
+            # Zero BM25 score means no query term occurs in the document: not a match.
+            lexical = [(cid, s) for cid, s in lexical if s > 0]
         for cid, s in lexical:
             scores.setdefault(cid, {})["bm25"] = round(s, 4)
         ranking = [c for c, _ in lexical]

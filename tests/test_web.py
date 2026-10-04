@@ -52,6 +52,12 @@ def test_agent_endpoint_lexical(lexical_client):
 
 def test_rejects_empty_query(lexical_client):
     assert lexical_client.post("/api/agent", json={"query": ""}).status_code == 422
+    assert lexical_client.post("/api/search", json={"query": "   ", "method": "bm25"}).status_code == 422
+
+
+def test_bm25_returns_nothing_for_unmatched_terms():
+    out = NexusEngine(enable_models=False).search("zzzz qqqq", method="bm25")
+    assert out["results"] == []
 
 
 @needs_models
